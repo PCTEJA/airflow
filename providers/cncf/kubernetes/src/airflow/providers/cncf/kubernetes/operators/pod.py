@@ -1424,8 +1424,13 @@ class KubernetesPodOperator(BaseOperator):
             self.patch_already_checked(remote_pod, reraise=False)
 
         # A pod abandoned while its sidecars still run never reaches a terminal phase, so read the
-        # outcome off the base container instead of the phase it is stuck in.
-        if istio_enabled or self.do_xcom_push or pod_phase not in PodPhase.terminal_states:
+        # outcome off the base container instead of the phase it is stuck in. A missing phase
+        # stays a failure, as before: an unknown pod state must not be reported as success.
+        if (
+            istio_enabled
+            or self.do_xcom_push
+            or (pod_phase is not None and pod_phase not in PodPhase.terminal_states)
+        ):
             failed = not container_is_succeeded(remote_pod, self.base_container_name)
         else:
             failed = pod_phase != PodPhase.SUCCEEDED

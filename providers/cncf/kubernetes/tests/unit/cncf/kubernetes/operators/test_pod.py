@@ -1370,10 +1370,13 @@ class TestKubernetesPodOperator:
             k.execute(context=context)
 
     @pytest.mark.parametrize(
-        ("base_container_exit_code", "expect_failure"),
+        ("pod_phase", "base_container_exit_code", "expect_failure", "failure_match"),
         [
-            pytest.param(0, False, id="base-succeeded"),
-            pytest.param(1, True, id="base-failed"),
+            pytest.param("Running", 0, False, None, id="base-succeeded"),
+            pytest.param("Running", 1, True, "task failed", id="base-failed"),
+            # A missing phase stays a failure even when the base container exited
+            # successfully: an unknown pod state must not be reported as success.
+            pytest.param(None, 0, True, "returned a failure", id="missing-phase-still-fails"),
         ],
     )
     @patch(f"{POD_MANAGER_CLASS}.delete_pod")
@@ -1384,8 +1387,10 @@ class TestKubernetesPodOperator:
         find_pod_mock,
         await_pod_completion_mock,
         delete_pod_mock,
+        pod_phase,
         base_container_exit_code,
         expect_failure,
+        failure_match,
     ):
         """
         A user-supplied sidecar leaves the pod in Running after the base container exits, so cleanup
@@ -1402,7 +1407,7 @@ class TestKubernetesPodOperator:
         sidecar_status.state.terminated = None
 
         remote_pod = MagicMock()
-        remote_pod.status.phase = "Running"
+        remote_pod.status.phase = pod_phase
         remote_pod.status.container_statuses = [base_status, sidecar_status]
         remote_pod.metadata.name = "pod-with-user-sidecar"
         remote_pod.metadata.namespace = "default"
@@ -1419,7 +1424,7 @@ class TestKubernetesPodOperator:
         context["ti"].xcom_push = MagicMock()
 
         if expect_failure:
-            with pytest.raises(AirflowException, match="task failed"):
+            with pytest.raises(AirflowException, match=failure_match):
                 k.execute(context=context)
         else:
             k.execute(context=context)
